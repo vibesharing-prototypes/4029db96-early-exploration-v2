@@ -189,8 +189,8 @@ export function TableToolbar({
                         sx={{ fontSize: '0.875rem' }}
                       >
                         <MenuItem value="all">All</MenuItem>
-                        {filter.options.map((opt) => (
-                          <MenuItem key={opt.value} value={opt.value}>
+                        {filter.options.map((opt, optIdx) => (
+                          <MenuItem key={`${filter.id}-${opt.value}-${optIdx}`} value={opt.value}>
                             {opt.label}
                           </MenuItem>
                         ))}
@@ -198,12 +198,12 @@ export function TableToolbar({
                     </FormControl>
                   ) : (
                     <Stack spacing={0.5}>
-                      {filter.options.map((opt) => {
+                      {filter.options.map((opt, optIdx) => {
                         const currentValues = (activeFilters[filter.id] as string[]) || [];
                         const isChecked = currentValues.includes(opt.value);
                         return (
                           <MenuItem
-                            key={opt.value}
+                            key={`${filter.id}-multi-${opt.value}-${optIdx}`}
                             dense
                             onClick={() => {
                               const newValues = isChecked

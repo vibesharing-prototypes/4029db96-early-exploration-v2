@@ -397,6 +397,13 @@ function RiskDiscoveryContent() {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['risk', 'category', 'score', 'owner', 'sources', 'status', 'actions']);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [filterNewRisks, setFilterNewRisks] = useState(false);
+
+  // Single source of truth for external source groups (used by section cards and table filter)
+  const externalSourceGroups = [
+    { key: 'competitor' as const, types: ['competitor'] as const },
+    { key: 'news' as const, types: ['news'] as const },
+    { key: 'regulatory' as const, types: ['10k_filing', 'trend'] as const },
+  ];
   
   // Filter and column definitions for the toolbar
   const filterOptions = [
@@ -407,6 +414,9 @@ function RiskDiscoveryContent() {
       options: [
         { value: 'internal', label: 'Internal only' },
         { value: 'external', label: 'External only' },
+        { value: 'external_competitor', label: 'Competitor intelligence' },
+        { value: 'external_news', label: 'News & media' },
+        { value: 'external_regulatory', label: 'Regulatory & market trends' },
       ],
     },
     {
@@ -826,9 +836,9 @@ function RiskDiscoveryContent() {
                           External sources found
                         </Typography>
                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                          {dataSources.map((source) => (
+                          {dataSources.map((source, srcIdx) => (
                             <Chip
-                              key={source.id}
+                              key={`source-${source.id}-${srcIdx}`}
                               size="small"
                               label={source.name}
                               variant="outlined"
@@ -880,9 +890,9 @@ function RiskDiscoveryContent() {
                       External sources found
                     </Typography>
                     <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {dataSources.map((source) => (
+                      {dataSources.map((source, srcIdx) => (
                         <Chip
-                          key={source.id}
+                          key={`source-${source.id}-${srcIdx}`}
                           size="small"
                           label={source.name}
                           variant="outlined"
@@ -1006,26 +1016,15 @@ function RiskDiscoveryContent() {
                   {/* Expanded details - source group list */}
                   {(() => {
                     const externalRisks = suggestions.filter(s => s.sources?.some(src => src.type !== 'document'));
-                    const sourceGroups = [
-                      { 
-                        key: 'competitor', 
-                        types: ['competitor'], 
-                        label: 'Competitor intelligence', 
-                        icon: <CompetitorIcon sx={{ fontSize: 18, color: '#282E37' }} /> 
-                      },
-                      { 
-                        key: 'news', 
-                        types: ['news'], 
-                        label: 'News & media', 
-                        icon: <NewsIcon sx={{ fontSize: 18, color: '#282E37' }} /> 
-                      },
-                      { 
-                        key: 'regulatory', 
-                        types: ['10k_filing', 'trend'], 
-                        label: 'Regulatory & market trends', 
-                        icon: <RegulatoryIcon sx={{ fontSize: 18, color: '#282E37' }} /> 
-                      },
-                    ];
+                    const sourceGroupLabels: Record<string, { label: string; icon: React.ReactNode }> = {
+                      competitor: { label: 'Competitor intelligence', icon: <CompetitorIcon sx={{ fontSize: 18, color: '#282E37' }} /> },
+                      news: { label: 'News & media', icon: <NewsIcon sx={{ fontSize: 18, color: '#282E37' }} /> },
+                      regulatory: { label: 'Regulatory & market trends', icon: <RegulatoryIcon sx={{ fontSize: 18, color: '#282E37' }} /> },
+                    };
+                    const sourceGroups = externalSourceGroups.map(group => ({
+                      ...group,
+                      ...sourceGroupLabels[group.key],
+                    }));
                     
                     const groupedRisks = sourceGroups.map(group => ({
                       ...group,
@@ -1042,21 +1041,28 @@ function RiskDiscoveryContent() {
                     
                     return (
                       <Stack spacing={2}>
-                        {groupedRisks.map(({ key, types, label, icon, risks }) => (
+                        {groupedRisks.map(({ key, types, label, icon, risks }, groupIdx) => {
+                          const isSelected = activeFilters.source === `external_${key}`;
+                          return (
                           <Paper
-                            key={key}
+                            key={`external-source-${key}-${groupIdx}`}
                             variant="outlined"
                             sx={{
                               p: 2,
                               cursor: 'pointer',
                               transition: 'all 0.2s',
+                              ...(isSelected && {
+                                bgcolor: 'primary.50',
+                                borderColor: 'primary.main',
+                                borderWidth: 2,
+                              }),
                               '&:hover': { 
-                                bgcolor: 'grey.50',
+                                bgcolor: isSelected ? 'primary.50' : 'grey.50',
                                 borderColor: 'primary.main',
                               },
                             }}
                             onClick={() => {
-                              setActiveFilters(prev => ({ ...prev, source: 'external' }));
+                              setActiveFilters(prev => ({ ...prev, source: `external_${key}` }));
                               setTimeout(() => {
                                 tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                               }, 100);
@@ -1074,7 +1080,8 @@ function RiskDiscoveryContent() {
                               </Box>
                             </Stack>
                           </Paper>
-                        ))}
+                          );
+                        })}
                       </Stack>
                     );
                   })()}
@@ -1129,8 +1136,8 @@ function RiskDiscoveryContent() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {suggestions
-                    .filter((risk) => {
+                  {(() => {
+                    const filtered = suggestions.filter((risk) => {
                       // Search filter
                       if (searchTerm) {
                         const search = searchTerm.toLowerCase();
@@ -1142,13 +1149,18 @@ function RiskDiscoveryContent() {
                         if (!matchesSearch) return false;
                       }
                       
-                      // Source filter
+                      // Source filter (must match logic used by external source cards above)
                       const sourceFilter = activeFilters.source as string;
                       if (sourceFilter && sourceFilter !== 'all') {
-                        const hasInternal = risk.sources?.some(s => s.type === 'document');
-                        const hasExternal = risk.sources?.some(s => s.type !== 'document');
+                        const hasInternal = risk.sources?.some(s => s?.type === 'document');
+                        const hasExternal = risk.sources?.some(s => s?.type !== 'document');
                         if (sourceFilter === 'internal' && !hasInternal) return false;
                         if (sourceFilter === 'external' && !hasExternal) return false;
+                        const externalGroup = externalSourceGroups.find(g => sourceFilter === `external_${g.key}`);
+                        if (externalGroup) {
+                          const hasMatchingSource = risk.sources?.some(s => s?.type && externalGroup.types.includes(s.type as typeof externalGroup.types[number]));
+                          if (!hasMatchingSource) return false;
+                        }
                       }
                       
                       // Category filter
@@ -1171,8 +1183,16 @@ function RiskDiscoveryContent() {
                       }
                       
                       return true;
-                    })
-                    .map((risk) => {
+                    });
+                    // Dedupe by risk.id so React never sees duplicate keys
+                    const seenIds = new Set<string>();
+                    const deduped = filtered.filter((risk) => {
+                      if (seenIds.has(risk.id)) return false;
+                      seenIds.add(risk.id);
+                      return true;
+                    });
+                    return deduped;
+                  })().map((risk) => {
                     const inherentScore = Math.round((risk.likelihood + risk.impact) / 2);
                     const isLoading = loadingRiskIds.has(risk.id);
                     
@@ -1336,8 +1356,8 @@ function RiskDiscoveryContent() {
                               </Typography>
                             )}
                           >
-                            {categories.map((cat) => (
-                              <MenuItem key={cat} value={cat} sx={{ textTransform: 'capitalize', fontSize: '0.875rem' }}>
+                            {categories.map((cat, catIdx) => (
+                              <MenuItem key={`cat-${catIdx}-${cat}`} value={cat} sx={{ textTransform: 'capitalize', fontSize: '0.875rem' }}>
                                 {cat}
                               </MenuItem>
                             ))}
@@ -1386,8 +1406,8 @@ function RiskDiscoveryContent() {
                                 </Stack>
                               )}
                             >
-                              {scoreOptions.map((option) => (
-                                <MenuItem key={option.value} value={option.value}>
+                              {scoreOptions.map((option, scoreOptIdx) => (
+                                <MenuItem key={`score-${option.value}-${scoreOptIdx}`} value={option.value}>
                                   <Stack direction="row" spacing={1} alignItems="center">
                                     <Box
                                       sx={{
@@ -1443,8 +1463,8 @@ function RiskDiscoveryContent() {
                               );
                             }}
                           >
-                            {availableOwners.map((owner) => (
-                              <MenuItem key={owner.name} value={owner.name}>
+                            {availableOwners.map((owner, ownerIdx) => (
+                              <MenuItem key={`owner-${ownerIdx}-${owner.name}`} value={owner.name}>
                                 <Stack direction="row" spacing={1} alignItems="center">
                                   <Avatar sx={{ width: 24, height: 24, fontSize: 11, bgcolor: getOwnerColor(owner.name) }}>
                                     {owner.name.charAt(0)}
@@ -1462,13 +1482,13 @@ function RiskDiscoveryContent() {
                         {visibleColumns.includes('sources') && (
                           <TableCell>
                             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                              {risk.sources.map((source) => {
+                              {risk.sources.map((source, sourceIdx) => {
                                 const chipLabel = source.type === 'document' 
                                   ? source.name 
                                   : sourceTypeLabels[source.type] || source.type;
                                 return (
                                   <Tooltip 
-                                    key={source.id} 
+                                    key={`${risk.id}-source-${sourceIdx}`} 
                                     title={
                                       <Box sx={{ whiteSpace: 'pre-line' }}>
                                         <Typography variant="body2" sx={{ fontWeight: 600 }}>
